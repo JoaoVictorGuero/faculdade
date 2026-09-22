@@ -6,7 +6,7 @@ Bem-vindo ao repositório principal da faculdade! Este espaço é destinado a or
 
 O repositório está organizado de forma cronológica por semestres e, em seguida, por disciplinas para facilitar a navegação. Abaixo está um mapa geral dos conteúdos disponíveis:
 
-### [Notion](https://joaovictorguero.notion.site/)
+### [Ciência da Computação - link para o Notion](https://joaovictorguero.notion.site/)
 
 Neste diretório estão agrupados os materiais do curso de Ciência da Computação:
 
