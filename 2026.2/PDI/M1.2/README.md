@@ -40,7 +40,7 @@ Sexto Semestre/PDI/
    ```
 3. Navegue até o diretório do projeto:
    ```bash
-   cd "Sexto Semestre/PDI"
+   cd "M1.2/PDI"
    ```
 4. Inicie o servidor do Jupyter Notebook:
    ```bash
@@ -50,5 +50,5 @@ Sexto Semestre/PDI/
 
 ## 📝 Notas de Implementação
 
-- O *seed* de aleatoriedade (`RUIDO_SEED = 42`) é fixado no código de modo que todas as configurações de testes recebam exatamente o mesmo padrão de ruído, garantindo assim a **reprodutibilidade** do experimento.
+- O _seed_ de aleatoriedade (`RUIDO_SEED = 42`) é fixado no código de modo que todas as configurações de testes recebam exatamente o mesmo padrão de ruído, garantindo assim a **reprodutibilidade** do experimento.
 - As imagens analisadas apresentam inicialmente um baixo contraste intrínseco (desvio padrão baixo + faixa estreita entre os percentis 1 e 99), o que pode exigir etapas de realce nas próximas fases do processamento.
