@@ -1,0 +1,7 @@
+python testes.py
+
+python experimentos.py
+
+
+python simulador.py --arquivo dados/cenario_A_t0.json --cpus 4 
+--sched rr --quantum 10 --subst lru --quadros 256 --custo-troca 1

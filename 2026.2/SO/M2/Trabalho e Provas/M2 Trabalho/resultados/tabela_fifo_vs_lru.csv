@@ -1,0 +1,9 @@
+id_execucao,cenario,cpus,escalonador,quantum,subst,quadros,custo_troca,espera_media,espera_maxima,turnaround_medio,resposta_media,makespan,speedup,eficiencia,trocas_contexto_total,page_faults_total,taxa_faults_pct,utilizacao_media_cpus_pct,ocioso_total_cpus
+cenario_A_1cpu_rr_q10_lru_256q,A,1,RR (Q=10),10,LRU,256,1,13583.34,77750,27397.46,499.50,84673,-,-,31859,28102,53.35,99.84,136
+cenario_A_4cpu_rr_q10_lru_256q,A,4,RR (Q=10),10,LRU,256,1,3123.81,15308,6868.78,124.50,21039,4.0246,1.0061,30789,26977,51.21,99.18,689
+cenario_B_1cpu_rr_q10_lru_256q,B,1,RR (Q=10),10,LRU,256,1,12480.58,74865,19075.72,472.11,83420,-,-,30637,26868,51.00,99.87,105
+cenario_B_4cpu_rr_q10_lru_256q,B,4,RR (Q=10),10,LRU,256,1,482.26,6407,795.07,28.50,17662,4.7231,1.1808,15193,10525,19.98,96.07,2777
+cenario_A_1cpu_rr_q10_fifo_256q,A,1,RR (Q=10),10,FIFO,256,1,13652.55,78822,27509.11,499.50,86396,-,-,33582,30138,57.21,99.84,136
+cenario_A_4cpu_rr_q10_fifo_256q,A,4,RR (Q=10),10,FIFO,256,1,3108.24,15115,6888.77,124.50,21431,4.0314,1.0078,32372,28870,54.80,99.21,674
+cenario_B_1cpu_rr_q10_fifo_256q,B,1,RR (Q=10),10,FIFO,256,1,12541.91,76633,19150.47,472.99,85238,-,-,32419,28977,55.01,99.83,141
+cenario_B_4cpu_rr_q10_fifo_256q,B,4,RR (Q=10),10,FIFO,256,1,439.48,6300,765.37,25.62,17883,4.7664,1.1916,15693,11154,21.17,95.58,3161
