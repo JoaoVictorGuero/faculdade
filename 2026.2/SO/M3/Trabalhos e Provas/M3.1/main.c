@@ -1074,7 +1074,7 @@ void cmd_help(void) {
     printf("  cp <orig> <dest>         - Copia arquivo\n");
     printf("  mv <orig> <dest>         - Renomeia ou move para pasta\n");
     printf("  rm <nome>                - Exclui arquivo\n");
-    printf("  stat <nome> / disco      - Mostra FCB e blocos / mapa do disco\n");
+    printf("  stat <nome> / disco      - Mostra os detalhes do arquivo ou do disco\n");
     printf("  user <dono|grupo|outros> - Troca usuario atual\n");
     printf("  exit                     - Sai e libera memoria\n");
 }
