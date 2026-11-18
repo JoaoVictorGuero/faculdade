@@ -1,2 +1,0 @@
-gcc -Wall -Wextra main.c -o simulador
-./simulador

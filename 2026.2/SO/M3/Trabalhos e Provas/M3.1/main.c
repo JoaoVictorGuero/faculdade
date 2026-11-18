@@ -4,11 +4,15 @@
  * - stdlib.h: O que e -> utilidades gerais e memoria. Como/Porque -> fornece malloc() e free() para criar e apagar arquivos/pastas em memoria.
  * - string.h: O que e -> manipulacao de strings. Como/Porque -> fornece strcmp() para comparar comandos/nomes, strcpy() para copiar e strlen() para medir tamanhos.
  * - time.h:   O que e -> manipulacao de data e hora. Como/Porque -> fornece time() para registrar timestamps nos arquivos e ctime() para mostra-los como texto.
+ * - termios.h: O que e -> controle de terminais POSIX. Como/Porque -> permite ativar o modo raw para capturar teclas especiais (setas para cima/baixo) sem esperar o Enter.
+ * - unistd.h:  O que e -> chamadas de sistema POSIX. Como/Porque -> fornece read() e isatty() para ler teclas diretamente do terminal e verificar se a entrada e interativa.
  */
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
+#include <termios.h>
+#include <unistd.h>
 
 /*
  * Constantes do disco simulado (#define):
@@ -315,6 +319,32 @@ void imprimir_caminho(Diretorio *dir) {
     if (dir->pai->pai != NULL) printf("/");
     /* Agora imprime o nome da pasta atual na volta da recursao */
     printf("%s", dir->nome);
+}
+
+/**
+ * Titulo: formatar_caminho - Monta a string do caminho completo do diretorio
+ *
+ * Descricao:
+ *   Concatena da raiz "/" ate o diretorio atual subindo recursivamente pelos ponteiros pai.
+ *
+ * O que brevemente é utilizado na funcao:
+ *   Recursao simples e strcat.
+ *
+ * Onde é utilizada:
+ *   main (para montar o texto do prompt antes da leitura com historico).
+ *
+ * Porque é feita dessa forma:
+ *   Permite guardar o caminho em uma string para redesenhar o prompt ao trocar de comando com as setas.
+ */
+void formatar_caminho(Diretorio *dir, char *buf) {
+    if (dir == NULL) return;
+    if (dir->pai == NULL) {
+        strcat(buf, "/");
+        return;
+    }
+    formatar_caminho(dir->pai, buf);
+    if (dir->pai->pai != NULL) strcat(buf, "/");
+    strcat(buf, dir->nome);
 }
 
 /* ---------- Alocacao de Blocos no Disco ---------- */
@@ -1049,6 +1079,293 @@ void cmd_help(void) {
     printf("  exit                     - Sai e libera memoria\n");
 }
 
+/* ---------- Leitura de Comandos e Historico do Terminal ---------- */
+
+#define MAX_HISTORICO 100
+
+static char historico[MAX_HISTORICO][350];
+static int total_historico = 0;
+static struct termios orig_termios;
+static int raw_mode_ativo = 0;
+
+/**
+ * Titulo: desativar_modo_raw - Restaura as configuracoes originais do terminal
+ *
+ * Descricao:
+ *   Devolve o terminal para o modo canonico com eco ligado, garantindo que o shell do usuario
+ *   nao fique travado ou sem exibir caracteres apos o simulador encerrar.
+ *
+ * O que brevemente é utilizado na funcao:
+ *   tcsetattr e variaveis estaticas globais.
+ *
+ * Onde é utilizada:
+ *   ler_linha_com_historico e atexit() no main.
+ *
+ * Porque é feita dessa forma:
+ *   Garante seguranca e limpeza do terminal em qualquer cenario de saida.
+ */
+void desativar_modo_raw(void) {
+    if (raw_mode_ativo) {
+        tcsetattr(STDIN_FILENO, TCSAFLUSH, &orig_termios);
+        raw_mode_ativo = 0;
+    }
+}
+
+/**
+ * Titulo: ativar_modo_raw - Habilita a leitura imediata de teclas (caractere a caractere)
+ *
+ * Descricao:
+ *   Desativa o buffer de linha (ICANON) e o eco automatico (ECHO), permitindo interceptar
+ *   teclas especiais como setas direcionais, backspace e atalhos em tempo real.
+ *
+ * O que brevemente é utilizado na funcao:
+ *   tcgetattr, tcsetattr e struct termios.
+ *
+ * Onde é utilizada:
+ *   ler_linha_com_historico.
+ *
+ * Porque é feita dessa forma:
+ *   Necessario para que as setas (codigos de escape ANSI) sejam detectadas antes do usuario teclar Enter.
+ */
+void ativar_modo_raw(void) {
+    if (!isatty(STDIN_FILENO)) return;
+    if (!raw_mode_ativo) {
+        if (tcgetattr(STDIN_FILENO, &orig_termios) == 0) {
+            struct termios raw = orig_termios;
+            raw.c_lflag &= ~(ICANON | ECHO);
+            raw.c_cc[VMIN] = 1;
+            raw.c_cc[VTIME] = 0;
+            tcsetattr(STDIN_FILENO, TCSAFLUSH, &raw);
+            raw_mode_ativo = 1;
+        }
+    }
+}
+
+/**
+ * Titulo: ler_linha_com_historico - Le uma linha do terminal com suporte a historico e setas
+ *
+ * Descricao:
+ *   Exibe o prompt e le os caracteres um a um no modo raw. Permite que as setas para cima e
+ *   para baixo naveguem pelos comandos anteriores salvos no historico, seta para esquerda e
+ *   direita movam o cursor, e backspace/delete editem a linha.
+ *
+ * O que brevemente é utilizado na funcao:
+ *   read, printf com sequencias ANSI (\r, \033[K, \033[C, \033[D), strcmp, strcpy e historico.
+ *
+ * Onde é utilizada:
+ *   main (no lugar do fgets).
+ *
+ * Porque é feita dessa forma:
+ *   Permite uma experiencia fluida de terminal interativo com historico funcional sem precisar
+ *   de bibliotecas externas pesadas (como readline), compilando direto com gcc comum.
+ */
+int ler_linha_com_historico(const char *prompt, char *buffer, int max_tam) {
+    /* Se a entrada nao for um terminal interativo (ex: arquivo redirecionado ou pipe), usa fgets */
+    if (!isatty(STDIN_FILENO)) {
+        printf("%s", prompt);
+        fflush(stdout);
+        if (fgets(buffer, max_tam, stdin) == NULL) return 0;
+        return 1;
+    }
+
+    ativar_modo_raw();
+    printf("%s", prompt);
+    fflush(stdout);
+
+    int pos = 0;
+    int len = 0;
+    buffer[0] = '\0';
+
+    char rascunho[350] = "";
+    int hist_idx = total_historico;
+
+    while (1) {
+        char c;
+        if (read(STDIN_FILENO, &c, 1) <= 0) {
+            desativar_modo_raw();
+            return 0; /* Fim de arquivo (EOF) */
+        }
+
+        /* Enter (\n ou \r) */
+        if (c == '\n' || c == '\r') {
+            buffer[len] = '\0';
+            printf("\n");
+            fflush(stdout);
+            desativar_modo_raw();
+
+            /* Salva no historico se nao for comando vazio e for diferente do ultimo executado */
+            if (len > 0) {
+                if (total_historico == 0 || strcmp(historico[total_historico - 1], buffer) != 0) {
+                    if (total_historico < MAX_HISTORICO) {
+                        strcpy(historico[total_historico++], buffer);
+                    } else {
+                        /* Desloca os comandos anteriores para abrir espaco ao mais novo */
+                        for (int i = 0; i < MAX_HISTORICO - 1; i++) {
+                            strcpy(historico[i], historico[i + 1]);
+                        }
+                        strcpy(historico[MAX_HISTORICO - 1], buffer);
+                    }
+                }
+            }
+            return 1;
+        }
+        /* Ctrl+D (EOT) */
+        else if (c == 4) {
+            if (len == 0) {
+                printf("\n");
+                fflush(stdout);
+                desativar_modo_raw();
+                return 0; /* EOF */
+            }
+        }
+        /* Ctrl+C (Interrupcao) */
+        else if (c == 3) {
+            printf("^C\n");
+            buffer[0] = '\0';
+            fflush(stdout);
+            desativar_modo_raw();
+            return 1;
+        }
+        /* Backspace (127 no Mac/Linux ou 8 '\b') */
+        else if (c == 127 || c == 8) {
+            if (pos > 0) {
+                for (int i = pos - 1; i < len; i++) {
+                    buffer[i] = buffer[i + 1];
+                }
+                pos--;
+                len--;
+                buffer[len] = '\0';
+                printf("\r\033[K%s%s", prompt, buffer);
+                if (pos < len) {
+                    printf("\033[%dD", len - pos);
+                }
+                fflush(stdout);
+            }
+        }
+        /* Sequencia de escape ANSI (Setas, Home, End, Delete) */
+        else if (c == 27) {
+            char seq[3];
+            if (read(STDIN_FILENO, &seq[0], 1) <= 0) continue;
+            if (read(STDIN_FILENO, &seq[1], 1) <= 0) continue;
+
+            if (seq[0] == '[' || seq[0] == 'O') {
+                /* Seta para CIMA: comando anterior */
+                if (seq[1] == 'A') {
+                    if (total_historico > 0 && hist_idx > 0) {
+                        if (hist_idx == total_historico) {
+                            strcpy(rascunho, buffer);
+                        }
+                        hist_idx--;
+                        strcpy(buffer, historico[hist_idx]);
+                        len = (int)strlen(buffer);
+                        pos = len;
+                        printf("\r\033[K%s%s", prompt, buffer);
+                        fflush(stdout);
+                    }
+                }
+                /* Seta para BAIXO: proximo comando */
+                else if (seq[1] == 'B') {
+                    if (hist_idx < total_historico) {
+                        hist_idx++;
+                        if (hist_idx == total_historico) {
+                            strcpy(buffer, rascunho);
+                        } else {
+                            strcpy(buffer, historico[hist_idx]);
+                        }
+                        len = (int)strlen(buffer);
+                        pos = len;
+                        printf("\r\033[K%s%s", prompt, buffer);
+                        fflush(stdout);
+                    }
+                }
+                /* Seta para DIREITA */
+                else if (seq[1] == 'C') {
+                    if (pos < len) {
+                        pos++;
+                        printf("\033[C");
+                        fflush(stdout);
+                    }
+                }
+                /* Seta para ESQUERDA */
+                else if (seq[1] == 'D') {
+                    if (pos > 0) {
+                        pos--;
+                        printf("\033[D");
+                        fflush(stdout);
+                    }
+                }
+                /* Tecla Delete (ESC [ 3 ~) */
+                else if (seq[1] == '3') {
+                    char t;
+                    if (read(STDIN_FILENO, &t, 1) > 0 && t == '~') {
+                        if (pos < len) {
+                            for (int i = pos; i < len; i++) {
+                                buffer[i] = buffer[i + 1];
+                            }
+                            len--;
+                            buffer[len] = '\0';
+                            printf("\r\033[K%s%s", prompt, buffer);
+                            if (pos < len) {
+                                printf("\033[%dD", len - pos);
+                            }
+                            fflush(stdout);
+                        }
+                    }
+                }
+                /* Tecla Home (ESC [ H) */
+                else if (seq[1] == 'H') {
+                    pos = 0;
+                    printf("\r\033[K%s%s", prompt, buffer);
+                    if (len > 0) {
+                        printf("\033[%dD", len);
+                    }
+                    fflush(stdout);
+                }
+                /* Tecla End (ESC [ F) */
+                else if (seq[1] == 'F') {
+                    pos = len;
+                    printf("\r\033[K%s%s", prompt, buffer);
+                    fflush(stdout);
+                }
+            }
+        }
+        /* Atalhos uteis: Ctrl+A (inicio), Ctrl+E (fim), Ctrl+L (limpar tela) */
+        else if (c == 1) { /* Ctrl+A */
+            pos = 0;
+            printf("\r\033[K%s%s", prompt, buffer);
+            if (len > 0) printf("\033[%dD", len);
+            fflush(stdout);
+        }
+        else if (c == 5) { /* Ctrl+E */
+            pos = len;
+            printf("\r\033[K%s%s", prompt, buffer);
+            fflush(stdout);
+        }
+        else if (c == 12) { /* Ctrl+L */
+            printf("\033[H\033[J\r\033[K%s%s", prompt, buffer);
+            if (pos < len) printf("\033[%dD", len - pos);
+            fflush(stdout);
+        }
+        /* Caracteres comuns digitaveis */
+        else if ((unsigned char)c >= 32 && (unsigned char)c <= 126) {
+            if (len < max_tam - 1) {
+                for (int i = len; i >= pos; i--) {
+                    buffer[i + 1] = buffer[i];
+                }
+                buffer[pos] = c;
+                pos++;
+                len++;
+                buffer[len] = '\0';
+                printf("\r\033[K%s%s", prompt, buffer);
+                if (pos < len) {
+                    printf("\033[%dD", len - pos);
+                }
+                fflush(stdout);
+            }
+        }
+    }
+}
+
 /* ---------- Funcao Principal ---------- */
 
 /**
@@ -1058,15 +1375,18 @@ void cmd_help(void) {
  *   Cria o diretorio raiz "/", exibe o prompt, le os comandos do teclado e chama as funcoes.
  *
  * O que brevemente é utilizado na funcao:
- *   malloc, fgets, sscanf, strcmp, laco while(1) e liberar_tudo.
+ *   malloc, ler_linha_com_historico, sscanf, strcmp, laco while(1) e liberar_tudo.
  *
  * Onde é utilizada:
  *   Ponto de entrada do programa executado pelo sistema operacional.
  *
  * Porque é feita dessa forma:
- *   Usar fgets + sscanf torna a leitura de comandos e argumentos simples e facil de explicar.
+ *   Permite navegar no historico com setas para cima/baixo e executar os comandos de forma interativa.
  */
 int main(void) {
+    /* Garante que o terminal volte ao modo padrao com eco caso o programa seja encerrado */
+    atexit(desativar_modo_raw);
+
     /* Cria dinamicamente o diretorio raiz "/" que serve de base para toda a arvore */
     Diretorio *raiz = (Diretorio *)malloc(sizeof(Diretorio));
     strcpy(raiz->nome, "/");
@@ -1084,13 +1404,14 @@ int main(void) {
 
     /* Loop interativo do terminal simulado: repete ate o usuario digitar "exit" */
     while (1) {
-        /* Mostra o usuario atual e o caminho da pasta no prompt (ex: [dono:/docs]$ ) */
-        printf("[%s:", nome_usuario(usuario_atual));
-        imprimir_caminho(atual);
-        printf("]$ ");
+        /* Monta o prompt com o usuario e caminho atual (ex: [dono:/docs]$ ) */
+        char prompt[350];
+        char caminho_atual[256] = "";
+        formatar_caminho(atual, caminho_atual);
+        snprintf(prompt, sizeof(prompt), "[%s:%s]$ ", nome_usuario(usuario_atual), caminho_atual);
 
-        /* Le uma linha inteira do teclado; se acabar a entrada (EOF), sai do loop */
-        if (fgets(linha, sizeof(linha), stdin) == NULL) break;
+        /* Le o comando do teclado com suporte a historico e setas (para cima / para baixo) */
+        if (!ler_linha_com_historico(prompt, linha, sizeof(linha))) break;
 
         /* Remove Enter (\n, \r) e espacos sobrando no final da linha para evitar erros nos nomes */
         int tam_linha = (int)strlen(linha);
